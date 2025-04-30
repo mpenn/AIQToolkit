@@ -23,7 +23,6 @@ from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceContext
 from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceEvent
 from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceLink
 from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceResource
-from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceResourceAttribute
 from aiq.observability.schemas.simple_otel_trace import SimpleOtelTraceStatus
 
 logger = logging.getLogger(__name__)

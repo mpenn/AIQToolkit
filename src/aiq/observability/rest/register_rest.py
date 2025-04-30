@@ -15,8 +15,6 @@ class RestTelemetryExporterConfig(TelemetryExporterBaseConfig, name="rest"):
     endpoint: str = Field(description="The REST service endpoint to export telemetry traces.")
     timeout: int = Field(default=60, description="The timeout for the REST request.")
     project: str = Field(description="The project name to group the telemetry traces.")
-    use_status: bool = Field(default=False, description="Whether to use the status of the span.")
-    use_resource: bool = Field(default=False, description="Whether to use the resource of the span.")
 
 
 @register_telemetry_exporter(config_type=RestTelemetryExporterConfig)
@@ -28,8 +26,6 @@ async def rest_telemetry_exporter(config: RestTelemetryExporterConfig, builder: 
     try:
         yield RestTelemetryExporter(endpoint=config.endpoint,
                                     timeout=config.timeout,
-                                    use_status=config.use_status,
-                                    use_resource=config.use_resource,
                                     translator=translate_span_to_simple_trace_model)
     except ConnectionError as ex:
         logger.warning("Unable to connect to REST service. Are you sure the service is running?\n %s",

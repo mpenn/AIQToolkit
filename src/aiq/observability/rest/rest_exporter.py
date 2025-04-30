@@ -56,12 +56,14 @@ class RestTelemetryExporter(AbstractAsyncTelemetryExporter):
 
             if translated_payload is not None:
 
+                # Serialize the payload and handle any errors
                 try:
                     serialized_payload: str = translated_payload.model_dump_json()
                 except Exception as e:
                     logger.exception("Error occured when exporting telemetry traces: %s", e, exc_info=e)
                     return
 
+                # Send the payload to the consuming service and handle any errors
                 try:
                     response = await client.post(self._endpoint, headers=self._headers, json=serialized_payload)
                     response.raise_for_status()

@@ -22,6 +22,8 @@ from aiq.cli.register_workflow import register_logging_method
 from aiq.cli.register_workflow import register_telemetry_exporter
 from aiq.data_models.logging import LoggingBaseConfig
 from aiq.data_models.telemetry_exporter import TelemetryExporterBaseConfig
+# This import is used for side effects to register the REST exporter
+from aiq.observability.rest.register_rest import rest_telemetry_exporter  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 

@@ -29,22 +29,18 @@ logger = logging.getLogger(__name__)
 class RestTelemetryExporter(AbstractAsyncTelemetryExporter):
     """A REST exporter to transmit traces to a consuming service."""
 
-    def __init__(self, endpoint: str, timeout: int, use_status: bool, use_resource: bool, translator: Callable):
+    def __init__(self, endpoint: str, timeout: int, translator: Callable):
         """Initialize the REST exporter.
 
         Args:
             endpoint (str): The endpoint to send the traces to.
             timeout (int): The timeout for the REST request.
-            use_status (bool): Whether to use the status of the span.
-            use_resource (bool): Whether to use the resource of the span.
             translator (Callable): The translator to translate the span to the appropriate format.
         """
 
         super().__init__(translator=translator)
         self._endpoint = endpoint
         self._timeout = timeout
-        self._use_status = use_status
-        self._use_resource = use_resource
         self._translator = translator
         self._headers = {"Content-Type": "application/json"}
 

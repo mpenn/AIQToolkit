@@ -73,7 +73,7 @@ class RestRegistryHandler(AbstractRegistryHandler):
         """
 
         try:
-
+            raise
             async with httpx.AsyncClient(headers=self._headers, timeout=self._timeout) as client:
                 response = await client.post(f"{self._endpoint}/{self._publish_route}",
                                              content=artifact.artifact.model_dump_json())

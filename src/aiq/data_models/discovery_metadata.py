@@ -101,6 +101,54 @@ class DiscoveryMetadata(BaseModel):
         return distro_name if distro_name else root_package_name
 
     @staticmethod
+    @lru_cache(maxsize=1)
+    def _get_package_mapping() -> dict:
+        """Build and cache the package-to-distribution mapping."""
+        mapping = {}
+
+        # Read metadata files to build accurate package-to-distribution mapping
+        for dist in importlib.metadata.distributions():
+            try:
+                top_level = dist.read_text('top_level.txt')
+                if top_level:
+                    dist_name = dist.metadata.get('name', '')
+                    if dist_name:
+                        for pkg in top_level.strip().split():
+                            if pkg not in mapping:
+                                mapping[pkg] = [dist_name]
+            except FileNotFoundError:
+                pass
+
+        return mapping
+
+    @staticmethod
+    @lru_cache
+    def get_distribution_name_from_mapping(root_package: str) -> str | None:
+        """Find the distribution that provides a given module using a mapping."""
+
+        # Get cached mapping
+        mapping = DiscoveryMetadata._get_package_mapping()
+        if root_package in mapping and mapping[root_package]:
+            return mapping[root_package][0]
+
+        # Final fallback: Direct distribution lookup (for edge cases where top_level.txt is missing)
+        candidates = [
+            root_package,  # exact match
+            root_package.replace('_', '-'),  # underscore to hyphen
+            root_package.replace('-', '_'),  # hyphen to underscore
+        ]
+
+        for candidate in candidates:
+            try:
+                dist = importlib.metadata.distribution(candidate)
+                if dist.metadata.get('name'):
+                    return dist.metadata.get('name')
+            except importlib.metadata.PackageNotFoundError:
+                continue
+
+        return None
+
+    @staticmethod
     @lru_cache
     def get_distribution_name_from_private_data(root_package: str) -> str | None:
         # Locate distibution mapping stored in the packages private data
@@ -123,7 +171,8 @@ class DiscoveryMetadata(BaseModel):
         root package name 'aiq'. They provide mapping in a metadata file
         for optimized installation.
         """
-        distro_name = DiscoveryMetadata.get_distribution_name_from_private_data(root_package)
+        # distro_name = DiscoveryMetadata.get_distribution_name_from_private_data(root_package)
+        distro_name = DiscoveryMetadata.get_distribution_name_from_mapping(root_package)
         return distro_name if distro_name else root_package
 
     @staticmethod

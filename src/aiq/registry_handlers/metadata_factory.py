@@ -27,8 +27,8 @@ class ComponentDiscoveryMetadata:
 
     def __init__(self, component_type: AIQComponentEnum, wheel_data: WheelData | None = None):
         self._component_type = component_type
-        self._metadata_items: list[dict | DiscoveryMetadata] = []
-        self._wheel_data: WheelData = wheel_data
+        self._metadata_items: list[DiscoveryMetadata] = []
+        self._wheel_data: WheelData | None = wheel_data
 
     def load_metadata(self):
 
@@ -46,12 +46,12 @@ class ComponentDiscoveryMetadata:
                         and (registered_component_info.discovery_metadata.package == self._wheel_data.package_name)):
                     discovery_metadata_copy = registered_component_info.discovery_metadata.model_copy(deep=True)
                     discovery_metadata_copy.version = self._wheel_data.whl_version
-                    self._metadata_items.append(discovery_metadata_copy.model_dump())
+                    self._metadata_items.append(discovery_metadata_copy)
                     continue
 
-                self._metadata_items.append(registered_component_info.discovery_metadata.model_dump())
+                self._metadata_items.append(registered_component_info.discovery_metadata)
 
-    def get_metadata_items(self) -> list[dict | DiscoveryMetadata]:
+    def get_metadata_items(self) -> list[DiscoveryMetadata]:
         return self._metadata_items
 
     @staticmethod

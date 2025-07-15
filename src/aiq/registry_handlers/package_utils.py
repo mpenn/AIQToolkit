@@ -15,10 +15,16 @@
 
 import base64
 import importlib.metadata
+import importlib.util
 import logging
 import os
+import re
 import subprocess
+import tomllib
 from functools import lru_cache
+
+from packaging.requirements import Requirement
+from pkginfo import Wheel
 
 from aiq.data_models.component import AIQComponentEnum
 from aiq.data_models.discovery_metadata import DiscoveryMetadata
@@ -29,6 +35,180 @@ from aiq.runtime.loader import discover_entrypoints
 
 # pylint: disable=redefined-outer-name
 logger = logging.getLogger(__name__)
+
+
+class DependencyResolver:
+    """Fast, offline dependency resolver using importlib.metadata."""
+
+    def __init__(self):
+        """Initialize resolver with local package metadata."""
+        self._metadata_cache = {}
+        self._load_metadata()
+
+    def _load_metadata(self):
+        """Load all package metadata once for fast lookup."""
+        unique_packages = set()
+
+        for dist in importlib.metadata.distributions():
+            name = dist.metadata.get('name', '').lower()
+            if name:
+                unique_packages.add(name)
+
+                # Normalize name (replace underscores/hyphens)
+                normalized = re.sub(r'[-_]+', '-', name)
+
+                self._metadata_cache[normalized] = {
+                    'name': name, 'version': dist.version, 'requires': dist.requires or []
+                }
+
+                # Also cache with original name and underscore variant
+                self._metadata_cache[name] = self._metadata_cache[normalized]
+                underscore_name = name.replace('-', '_')
+                if underscore_name != name:
+                    self._metadata_cache[underscore_name] = (self._metadata_cache[normalized])
+
+    def _normalize_name(self, name: str) -> str:
+        """Normalize package name for consistent lookup."""
+        return re.sub(r'[-_]+', '-', name.lower())
+
+    def _parse_requirement(self, req_str: str) -> str | None:
+        """Parse requirement string and return package name."""
+        try:
+            req = Requirement(req_str)
+            return self._normalize_name(req.name)
+        except Exception:
+            # Fallback to simple parsing
+            name = re.split(r'[<>=~!;\[]', req_str)[0].strip()
+            return self._normalize_name(name) if name else None
+
+    def get_all_dependencies(self, root_packages: list[str]) -> set[str]:
+        """
+        Get all dependencies for given root packages using BFS.
+
+        Args:
+            root_packages (list[str]): List of root package names
+
+        Returns:
+            set[str]: Set of all package names (including root packages)
+        """
+        all_packages = set()
+        to_process = set(self._normalize_name(pkg) for pkg in root_packages)
+        visited = set()
+
+        while to_process:
+            current = to_process.pop()
+
+            if current in visited:
+                continue
+
+            visited.add(current)
+            all_packages.add(current)
+
+            # Get package metadata
+            pkg_info = self._metadata_cache.get(current)
+            if not pkg_info:
+                continue
+
+            # Add dependencies to process
+            for req_str in pkg_info['requires']:
+                dep_name = self._parse_requirement(req_str)
+                if dep_name and dep_name not in visited:
+                    to_process.add(dep_name)
+
+        return all_packages
+
+    def get_package_info(self, package_name: str) -> dict | None:
+        """Get package information if available locally.
+
+        Args:
+            package_name (str): Name of the package to get information for
+
+        Returns:
+            dict | None: Package information if available, None otherwise
+        """
+        normalized = self._normalize_name(package_name)
+        return self._metadata_cache.get(normalized)
+
+    def resolve_pyproject_dependencies(self,
+                                       pyproject_path: str = "pyproject.toml",
+                                       include_dependency_groups: bool = False,
+                                       include_optional_dependencies: bool = False) -> dict[str, dict]:
+        """
+        Resolve all dependencies from pyproject.toml.
+
+        Args:
+            pyproject_path (str): Path to pyproject.toml file
+            include_dependency_groups (bool): Whether to include dependency-groups
+            include_optional_dependencies (bool): Whether to include project.optional-dependencies
+
+        Returns:
+            dict[str, dict]: Dict mapping package names to their info
+        """
+        # Parse pyproject.toml
+        try:
+            with open(pyproject_path, 'rb') as f:
+                data = tomllib.load(f)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"pyproject.toml not found at {pyproject_path}") from exc
+        except Exception as exc:
+            raise ValueError(f"Failed to parse pyproject.toml: {exc}") from exc
+
+        # Extract dependencies
+        dependencies = []
+
+        # Main dependencies
+        project_deps = data.get("project", {}).get("dependencies", [])
+        dependencies.extend(project_deps)
+
+        # Optional dependencies (project.optional-dependencies)
+        if include_optional_dependencies:
+            optional_deps = data.get("project", {}).get("optional-dependencies", {})
+            for group_deps in optional_deps.values():
+                dependencies.extend(group_deps)
+
+        # Dependency groups (dependency-groups)
+        if include_dependency_groups:
+            dep_groups = data.get("dependency-groups", {})
+            for group_deps in dep_groups.values():
+                dependencies.extend(group_deps)
+
+        # Parse root packages
+        root_packages = []
+        for dep in dependencies:
+            pkg_name = self._parse_requirement(dep)
+            if pkg_name:
+                root_packages.append(pkg_name)
+
+        # Get all dependencies
+        all_packages = self.get_all_dependencies(root_packages)
+
+        # Build result with package info
+        result = {}
+        locally_found = 0
+
+        for pkg_name in all_packages:
+            pkg_info = self.get_package_info(pkg_name)
+            if pkg_info:
+                result[pkg_name] = {'name': pkg_info['name'], 'version': pkg_info['version'], 'found_locally': True}
+                locally_found += 1
+            else:
+                result[pkg_name] = {'name': pkg_name, 'version': None, 'found_locally': False}
+
+        return result
+
+    def resolve_all_dependencies(self, pyproject_path: str = "pyproject.toml") -> dict[str, dict]:
+        """
+        Resolve all dependencies from pyproject.toml including optional ones.
+
+        Args:
+            pyproject_path (str): Path to pyproject.toml file
+
+        Returns:
+            dict[str, dict]: Dict mapping package names to their info
+        """
+        return self.resolve_pyproject_dependencies(pyproject_path=pyproject_path,
+                                                   include_dependency_groups=True,
+                                                   include_optional_dependencies=True)
 
 
 @lru_cache
@@ -67,13 +247,11 @@ def build_wheel(package_root: str) -> WheelData:
         WheelData: Data model containing a built python wheel and its corresponding metadata.
     """
 
-    import importlib.util
-    import re
-    import tomllib
-
-    from pkginfo import Wheel
-
     pyproject_toml_path = os.path.join(package_root, "pyproject.toml")
+
+    resolver = DependencyResolver()
+    all_dependencies = resolver.resolve_all_dependencies(pyproject_path=pyproject_toml_path)
+    union_dependencies = set(k for k, v in all_dependencies.items() if v["found_locally"])
 
     if not os.path.exists(pyproject_toml_path):
         raise ValueError("Invalid package path, does not contain a pyproject.toml file.")
@@ -85,60 +263,61 @@ def build_wheel(package_root: str) -> WheelData:
     toml_project_name = toml_project.get("name", None)
 
     assert toml_project_name is not None, f"Package name '{toml_project_name}' not found in pyproject.toml"
-    # replace "aiqtoolkit" substring with "aiq" to get the import name
     module_name = get_module_name_from_distribution(toml_project_name)
     assert module_name is not None, f"No modules found for package name '{toml_project_name}'"
 
     assert importlib.util.find_spec(module_name) is not None, (f"Package {module_name} not "
                                                                "installed, cannot discover components.")
 
-    toml_packages = set(i for i in data.get("project", {}).get("entry-points", {}).get("aiq.plugins", {}))
-    toml_dependencies = set(
-        re.search(r"[a-zA-Z][a-zA-Z\d_-]*", package_name).group(0)
-        for package_name in toml_project.get("dependencies", []))
-
-    union_dependencies = toml_dependencies.union(toml_packages)
     union_dependencies.add(toml_project_name)
 
     working_dir = os.getcwd()
     os.chdir(package_root)
 
-    result = subprocess.run(["uv", "build", "--wheel"], check=True)
+    # Ensure build happens in the correct directory and dist is created here
+    result = subprocess.run(["uv", "build", "--wheel", "--out-dir", "dist"], check=True)
     result.check_returncode()
 
-    whl_file = sorted(os.listdir("dist"), reverse=True)[0]
+    # The dist directory should now be in the current directory (package root)
+    if not os.path.exists("dist"):
+        raise FileNotFoundError(f"Build failed: dist directory not found in package root {os.getcwd()}")
+
+    whl_files = [f for f in os.listdir("dist") if f.endswith('.whl')]
+    if not whl_files:
+        raise FileNotFoundError(f"No wheel files found in {os.getcwd()}/dist")
+
+    whl_file = sorted(whl_files, reverse=True)[0]
     whl_file_path = os.path.join("dist", whl_file)
 
     with open(whl_file_path, "rb") as whl:
         whl_bytes = whl.read()
         whl_base64 = base64.b64encode(whl_bytes).decode("utf-8")
 
+    # Create absolute path for the wheel file
     whl_path = os.path.join(os.getcwd(), whl_file_path)
 
     os.chdir(working_dir)
 
-    whl_version = Wheel(whl_path).version
+    whl_version = Wheel(whl_path).version or "unknown"
 
     return WheelData(
         package_root=package_root,
         package_name=module_name,  # should it be module name or distro name here
         toml_project=toml_project,
-        toml_dependencies=toml_dependencies,
-        toml_aiq_packages=toml_packages,
         union_dependencies=union_dependencies,
         whl_path=whl_path,
         whl_base64=whl_base64,
         whl_version=whl_version)
 
 
-def build_package_metadata(wheel_data: WheelData | None) -> dict[AIQComponentEnum, list[dict | DiscoveryMetadata]]:
+def build_package_metadata(wheel_data: WheelData | None) -> dict[AIQComponentEnum, list[DiscoveryMetadata]]:
     """Loads discovery metadata for all registered AIQ Toolkit components included in this Python package.
 
     Args:
         wheel_data (WheelData): Data model containing a built python wheel and its corresponding metadata.
 
     Returns:
-        dict[AIQComponentEnum, list[typing.Union[dict, DiscoveryMetadata]]]: List containing each components discovery
+        dict[AIQComponentEnum, list[DiscoveryMetadata]]: List containing each components discovery
         metadata.
     """
 

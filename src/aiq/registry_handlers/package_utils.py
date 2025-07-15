@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 class DependencyResolver:
-    """Fast, offline dependency resolver using importlib.metadata."""
+    """Offline dependency resolver using importlib.metadata."""
 
     def __init__(self):
         """Initialize resolver with local package metadata."""
@@ -67,10 +67,12 @@ class DependencyResolver:
                 if underscore_name != name:
                     self._metadata_cache[underscore_name] = (self._metadata_cache[normalized])
 
+    @lru_cache(maxsize=128)
     def _normalize_name(self, name: str) -> str:
         """Normalize package name for consistent lookup."""
         return re.sub(r'[-_]+', '-', name.lower())
 
+    @lru_cache(maxsize=256)
     def _parse_requirement(self, req_str: str) -> str | None:
         """Parse requirement string and return package name."""
         try:
@@ -81,15 +83,16 @@ class DependencyResolver:
             name = re.split(r'[<>=~!;\[]', req_str)[0].strip()
             return self._normalize_name(name) if name else None
 
-    def get_all_dependencies(self, root_packages: list[str]) -> set[str]:
+    @lru_cache(maxsize=64)
+    def get_all_dependencies(self, root_packages: tuple[str, ...]) -> frozenset[str]:
         """
         Get all dependencies for given root packages using BFS.
 
         Args:
-            root_packages (list[str]): List of root package names
+            root_packages (tuple[str, ...]): Tuple of root package names
 
         Returns:
-            set[str]: Set of all package names (including root packages)
+            frozenset[str]: Set of all package names (including root packages)
         """
         all_packages = set()
         to_process = set(self._normalize_name(pkg) for pkg in root_packages)
@@ -110,12 +113,12 @@ class DependencyResolver:
                 continue
 
             # Add dependencies to process
-            for req_str in pkg_info['requires']:
+            for req_str in pkg_info.get('requires', []):
                 dep_name = self._parse_requirement(req_str)
                 if dep_name and dep_name not in visited:
                     to_process.add(dep_name)
 
-        return all_packages
+        return frozenset(all_packages)
 
     def get_package_info(self, package_name: str) -> dict | None:
         """Get package information if available locally.
@@ -180,7 +183,7 @@ class DependencyResolver:
                 root_packages.append(pkg_name)
 
         # Get all dependencies
-        all_packages = self.get_all_dependencies(root_packages)
+        all_packages = self.get_all_dependencies(tuple(root_packages))
 
         # Build result with package info
         result = {}

@@ -31,6 +31,7 @@ from aiq.registry_handlers.schemas.search import SearchQuery
 from aiq.registry_handlers.schemas.search import SearchResponse
 from aiq.registry_handlers.schemas.status import ActionEnum
 from aiq.registry_handlers.schemas.status import StatusEnum
+from aiq.registry_handlers.schemas.status import StatusMessage
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +54,11 @@ class LocalRegistryHandler(AbstractRegistryHandler):
         """
 
         try:
-            validated_remove_response = RemoveResponse(status={
-                "status": StatusEnum.ERROR, "message": "Local publish not supported.", "action": ActionEnum.PUBLISH
-            })
-            yield validated_remove_response
+            validated_publish_response = PublishResponse(status=StatusMessage(
+                status=StatusEnum.ERROR, message="Local publish not supported.", action=ActionEnum.PUBLISH))
+            yield validated_publish_response
         finally:
-            logger.warning(validated_remove_response.status.message)
+            logger.warning(validated_publish_response.status.message)
 
     @asynccontextmanager
     async def pull(self, packages: PullRequestPackages) -> AsyncGenerator[PullResponse]:
@@ -73,13 +73,12 @@ class LocalRegistryHandler(AbstractRegistryHandler):
         """
 
         try:
-            validated_remove_response = RemoveResponse(status={
-                "status": StatusEnum.ERROR, "message": "Local pull not supported.", "action": ActionEnum.PULL
-            })
+            validated_pull_response = PullResponse(status=StatusMessage(
+                status=StatusEnum.ERROR, message="Local pull not supported.", action=ActionEnum.PULL))
 
-            yield validated_remove_response
+            yield validated_pull_response
         finally:
-            logger.warning(validated_remove_response.status.message)
+            logger.warning(validated_pull_response.status.message)
 
     @asynccontextmanager
     async def search(self, query: SearchQuery) -> AsyncGenerator[SearchResponse]:
@@ -118,21 +117,17 @@ class LocalRegistryHandler(AbstractRegistryHandler):
 
             validated_search_response = SearchResponse(results=matched_results[:top_k],
                                                        params=query,
-                                                       status={
-                                                           "status": StatusEnum.SUCCESS,
-                                                           "message": "",
-                                                           "action": ActionEnum.SEARCH
-                                                       })
+                                                       status=StatusMessage(status=StatusEnum.SUCCESS,
+                                                                            message="",
+                                                                            action=ActionEnum.SEARCH))
             yield validated_search_response
 
         except Exception as e:
             msg = f"Error searching for artifacts: {e}"
             validated_search_response = SearchResponse(params=query,
-                                                       status={
-                                                           "status": StatusEnum.SUCCESS,
-                                                           "message": msg,
-                                                           "action": ActionEnum.SEARCH
-                                                       })
+                                                       status=StatusMessage(status=StatusEnum.SUCCESS,
+                                                                            message=msg,
+                                                                            action=ActionEnum.SEARCH))
             logger.exception(validated_search_response.status.message, exc_info=True)
 
             yield validated_search_response

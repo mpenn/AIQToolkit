@@ -32,6 +32,7 @@ from aiq.registry_handlers.schemas.search import SearchResponse
 from aiq.registry_handlers.schemas.search import SearchResponseItem
 from aiq.registry_handlers.schemas.status import ActionEnum
 from aiq.registry_handlers.schemas.status import StatusEnum
+from aiq.registry_handlers.schemas.status import StatusMessage
 
 logger = logging.getLogger(__name__)
 
@@ -75,17 +76,15 @@ class PypiRegistryHandler(AbstractRegistryHandler):
             result = self._upload_to_pypi(wheel_path=artifact.whl_path)
             result.check_returncode()
 
-            validated_publish_response = PublishResponse(status={
-                "status": StatusEnum.SUCCESS, "message": "", "action": ActionEnum.PUBLISH
-            })
+            validated_publish_response = PublishResponse(
+                status=StatusMessage(status=StatusEnum.SUCCESS, message="", action=ActionEnum.PUBLISH))
 
             yield validated_publish_response
 
         except Exception as e:
             msg = f"Error publishing package: {e}"
-            validated_publish_response = PublishResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.PUBLISH
-            })
+            validated_publish_response = PublishResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.PUBLISH))
             logger.exception(validated_publish_response.status.message, exc_info=True)
 
             yield validated_publish_response
@@ -93,7 +92,7 @@ class PypiRegistryHandler(AbstractRegistryHandler):
         finally:
             logger.info("Execution complete.")
 
-    def _upload_to_pypi(self, wheel_path: str) -> None:
+    def _upload_to_pypi(self, wheel_path: str) -> subprocess.CompletedProcess[bytes]:
 
         return subprocess.run(
             ["twine", "upload", "--repository-url", f"{self._endpoint}/{self._publish_route}", f"{wheel_path}"],
@@ -140,17 +139,15 @@ class PypiRegistryHandler(AbstractRegistryHandler):
 
             result.check_returncode()
 
-            validated_pull_response = PullResponse(status={
-                "status": StatusEnum.SUCCESS, "message": "", "action": ActionEnum.PULL
-            })
+            validated_pull_response = PullResponse(
+                status=StatusMessage(status=StatusEnum.SUCCESS, message="", action=ActionEnum.PULL))
 
             yield validated_pull_response
 
         except Exception as e:
             msg = f"Error pulling packages: {e}"
-            validated_pull_response = PullResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.PULL
-            })
+            validated_pull_response = PullResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.PULL))
             logger.exception(validated_pull_response.status.message, exc_info=True)
 
             yield validated_pull_response
@@ -205,11 +202,9 @@ class PypiRegistryHandler(AbstractRegistryHandler):
 
             validated_search_response = SearchResponse(results=search_response_list,
                                                        params=query,
-                                                       status={
-                                                           "status": StatusEnum.SUCCESS,
-                                                           "message": "",
-                                                           "action": ActionEnum.SEARCH
-                                                       })
+                                                       status=StatusMessage(status=StatusEnum.SUCCESS,
+                                                                            message="",
+                                                                            action=ActionEnum.SEARCH))
 
             yield validated_search_response
 
@@ -217,11 +212,9 @@ class PypiRegistryHandler(AbstractRegistryHandler):
             msg = f"Error searching for artifacts: {e}"
             logger.exception(msg, exc_info=True)
             validated_search_response = SearchResponse(params=query,
-                                                       status={
-                                                           "status": StatusEnum.ERROR,
-                                                           "message": msg,
-                                                           "action": ActionEnum.SEARCH
-                                                       })
+                                                       status=StatusMessage(status=StatusEnum.ERROR,
+                                                                            message=msg,
+                                                                            action=ActionEnum.SEARCH))
 
             yield validated_search_response
 
@@ -229,7 +222,7 @@ class PypiRegistryHandler(AbstractRegistryHandler):
             logger.info("Execution complete.")
 
     @asynccontextmanager
-    async def remove(self, packages: PackageNameVersionList) -> AsyncGenerator[SearchResponse]:
+    async def remove(self, packages: PackageNameVersionList) -> AsyncGenerator[RemoveResponse]:
         """Removes packages from a remote registry.
 
         Args:
@@ -242,9 +235,8 @@ class PypiRegistryHandler(AbstractRegistryHandler):
 
         try:
             msg = "PyPI remove not supported."
-            validated_remove_response = RemoveResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.REMOVE
-            })
+            validated_remove_response = RemoveResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.REMOVE))
 
             yield validated_remove_response
         finally:

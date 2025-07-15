@@ -35,6 +35,7 @@ from aiq.registry_handlers.schemas.search import SearchQuery
 from aiq.registry_handlers.schemas.search import SearchResponse
 from aiq.registry_handlers.schemas.status import ActionEnum
 from aiq.registry_handlers.schemas.status import StatusEnum
+from aiq.registry_handlers.schemas.status import StatusMessage
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,9 @@ class RestRegistryHandler(AbstractRegistryHandler):
         self._pull_route = pull_route.strip("/")
         self._search_route = search_route.strip("/")
         self._remove_route = remove_route.strip("/")
-        self._headers = RequestHeaders(Authorization=f"Bearer: {token}").model_dump(by_alias=True)
+        self._headers = RequestHeaders(**{
+            "Accept": "application/json", "Content-Type": "application/json", "Authorization": f"Bearer: {token}"
+        }).model_dump(by_alias=True)
 
     @asynccontextmanager
     async def publish(self, artifact: AIQArtifact) -> AsyncGenerator[PublishResponse]:
@@ -73,7 +76,10 @@ class RestRegistryHandler(AbstractRegistryHandler):
         """
 
         try:
-            raise
+
+            if artifact.artifact is None:
+                raise ValueError("AIQArtifact.artifact is None and cannot be published")
+
             async with httpx.AsyncClient(headers=self._headers, timeout=self._timeout) as client:
                 response = await client.post(f"{self._endpoint}/{self._publish_route}",
                                              content=artifact.artifact.model_dump_json())
@@ -86,9 +92,8 @@ class RestRegistryHandler(AbstractRegistryHandler):
 
         except Exception as e:
             msg = f"Error publishing package: {e}"
-            validated_publish_response = PublishResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.PUBLISH
-            })
+            validated_publish_response = PublishResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.PUBLISH))
             logger.exception(validated_publish_response.status.message, exc_info=True)
 
             yield validated_publish_response
@@ -153,9 +158,8 @@ class RestRegistryHandler(AbstractRegistryHandler):
             if (os.path.exists(tmp_dir)):
                 shutil.rmtree(tmp_dir)
 
-            validated_pull_response = PullResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.PULL
-            })
+            validated_pull_response = PullResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.PULL))
             logger.exception(validated_pull_response.status.message, exc_info=True)
 
             yield validated_pull_response
@@ -189,11 +193,9 @@ class RestRegistryHandler(AbstractRegistryHandler):
         except Exception as e:
             msg = f"Error searching for artifacts: {e}"
             validated_search_response = SearchResponse(params=query,
-                                                       status={
-                                                           "status": StatusEnum.ERROR,
-                                                           "message": msg,
-                                                           "action": ActionEnum.SEARCH
-                                                       })
+                                                       status=StatusMessage(status=StatusEnum.ERROR,
+                                                                            message=msg,
+                                                                            action=ActionEnum.SEARCH))
             logger.exception(validated_search_response.status.message, exc_info=True)
 
             yield validated_search_response
@@ -226,9 +228,8 @@ class RestRegistryHandler(AbstractRegistryHandler):
 
         except Exception as e:
             msg = f"Error removing artifacts: {e}"
-            validated_remove_response = RemoveResponse(status={
-                "status": StatusEnum.ERROR, "message": msg, "action": ActionEnum.REMOVE
-            })
+            validated_remove_response = RemoveResponse(
+                status=StatusMessage(status=StatusEnum.ERROR, message=msg, action=ActionEnum.REMOVE))
             logger.exception(validated_remove_response.status.message, exc_info=True)
 
             yield validated_remove_response

@@ -169,7 +169,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Set up telemetry (logging and tracing)
         telemetry_config = self.general_config.telemetry
-
+        logger.info("Building %s telemetry logging handlers", len(telemetry_config.logging))
         for key, logging_config in telemetry_config.logging.items():
             logging_info = self._registry.get_logging_method(type(logging_config))
             handler = await self._exit_stack.enter_async_context(logging_info.build_fn(logging_config, self))
@@ -181,6 +181,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
             logging.getLogger().addHandler(handler)
 
         # Add the trace exporters
+        logger.info("Building %s telemetry exporters", len(telemetry_config.tracing))
         await asyncio.gather(*[
             self.add_exporter(key, trace_exporter_config)
             for key, trace_exporter_config in telemetry_config.tracing.items()
@@ -893,7 +894,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         Populate the builder with all components using dynamic dependency resolution.
         All components start building immediately and resolve dependencies on-demand.
         """
-        logger.info("Starting dynamic component building")
+        logger.info("Building components")
         
         # Track configured components for missing component detection
         for name in config.llms.keys():

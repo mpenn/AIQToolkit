@@ -349,60 +349,48 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         """
         from aiq.builder.exceptions import DependencyNotReadyError
         
-        # Retry loop for dependency waiting
-        max_retries = 100  # Reasonable maximum to avoid infinite loops
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                # Mark as building (with lock protection)
-                async with self._component_info_lock:
-                    self._component_info[component_name] = ComponentInfo(
-                        name=component_name,
-                        config=config,
-                        state=ComponentState.BUILDING
-                    )
-                
-                logger.debug("Starting to build %s component: %s", component_group.value, component_name)
-                
-                # Build the component based on its type
-                if component_group == ComponentGroup.LLMS:
-                    instance = await self._build_llm_internal(component_name, config)
-                elif component_group == ComponentGroup.EMBEDDERS:
-                    instance = await self._build_embedder_internal(component_name, config)
-                elif component_group == ComponentGroup.MEMORY:
-                    instance = await self._build_memory_internal(component_name, config)
-                elif component_group == ComponentGroup.RETRIEVERS:
-                    instance = await self._build_retriever_internal(component_name, config)
-                elif component_group == ComponentGroup.FUNCTIONS:
-                    instance = await self._build_function_internal(component_name, config)
-                else:
-                    raise ValueError(f"Unknown component group: {component_group}")
-                
-                # Mark as ready
-                await self._mark_component_ready(component_name, instance)
-                logger.debug("Successfully built %s component: %s", component_group.value, component_name)
-                return  # Success, exit the retry loop
-                
-            except DependencyNotReadyError as e:
-                # This is normal building flow - wait for the dependency and retry
-                logger.debug("Component %s waiting for dependency %s (attempt %d)", 
-                             component_name, e.dependency_name, retry_count + 1)
-                await self._wait_for_component(e.dependency_name, component_name)
-                retry_count += 1
-                continue
-                
-            except Exception as e:
-                # This is an actual error
-                logger.error("Failed to build %s component %s: %s", 
-                             component_group.value, component_name, e, exc_info=True)
-                await self._mark_component_failed(component_name, e)
-                return  # Exit on actual error
-        
-        # If we get here, we've exceeded max retries
-        error_msg = f"Component {component_name} exceeded maximum dependency wait retries ({max_retries})"
-        logger.error(error_msg)
-        await self._mark_component_failed(component_name, RuntimeError(error_msg))
+        try:
+            # Mark as building (with lock protection)
+            async with self._component_info_lock:
+                self._component_info[component_name] = ComponentInfo(
+                    name=component_name,
+                    config=config,
+                    state=ComponentState.BUILDING
+                )
+            
+            logger.debug("Starting to build %s component: %s", component_group.value, component_name)
+            
+            # Build the component based on its type
+            if component_group == ComponentGroup.LLMS:
+                instance = await self._build_llm_internal(component_name, config)
+            elif component_group == ComponentGroup.EMBEDDERS:
+                instance = await self._build_embedder_internal(component_name, config)
+            elif component_group == ComponentGroup.MEMORY:
+                instance = await self._build_memory_internal(component_name, config)
+            elif component_group == ComponentGroup.RETRIEVERS:
+                instance = await self._build_retriever_internal(component_name, config)
+            elif component_group == ComponentGroup.FUNCTIONS:
+                instance = await self._build_function_internal(component_name, config)
+            else:
+                raise ValueError(f"Unknown component group: {component_group}")
+            
+            # Mark as ready
+            await self._mark_component_ready(component_name, instance)
+            logger.debug("Successfully built %s component: %s", component_group.value, component_name)
+            
+        except DependencyNotReadyError as e:
+            # Wait for the dependency and retry once (no loop needed)
+            logger.debug("Component %s waiting for dependency %s", component_name, e.dependency_name)
+            await self._wait_for_component(e.dependency_name, component_name)
+            
+            # Retry the build once after dependency is ready
+            await self._build_component_async(component_name, component_group, config)
+            
+        except Exception as e:
+            # Handle all other errors
+            logger.error("Failed to build %s component %s: %s", 
+                         component_group.value, component_name, e, exc_info=True)
+            await self._mark_component_failed(component_name, e)
 
     # Internal build methods
     async def _build_llm_internal(self, name: str, config: LLMBaseConfig) -> ConfiguredLLM:

@@ -22,7 +22,7 @@ from contextlib import AbstractAsyncContextManager
 from contextlib import AsyncExitStack
 from contextlib import asynccontextmanager
 from enum import Enum
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 from aiq.builder.builder import Builder
 from aiq.builder.builder import UserManagerHolder
@@ -75,9 +75,9 @@ class ComponentInfo:
     name: str
     config: Any
     state: ComponentState
-    instance: Optional[Any] = None
-    error: Optional[Exception] = None
-    waiters: Set[str] = dataclasses.field(default_factory=set)
+    instance: Any | None = None
+    error: Exception | None = None
+    waiters: set[str] = dataclasses.field(default_factory=set)
 
 
 @dataclasses.dataclass
@@ -146,12 +146,12 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         self._logging_handlers: dict[str, logging.Handler] = {}
 
         # Dynamic dependency resolution state
-        self._component_info: Dict[str, ComponentInfo] = {}
-        self._ready_events: Dict[str, asyncio.Event] = {}
-        self._build_tasks: Dict[str, asyncio.Task] = {}
+        self._component_info: dict[str, ComponentInfo] = {}
+        self._ready_events: dict[str, asyncio.Event] = {}
+        self._build_tasks: dict[str, asyncio.Task] = {}
 
         # Configuration tracking for missing component detection
-        self._configured_components: Dict[str, ComponentGroup] = {}
+        self._configured_components: dict[str, ComponentGroup] = {}
         
         # Locks for thread-safe access to shared data structures
         self._component_info_lock = asyncio.Lock()

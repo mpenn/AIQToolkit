@@ -166,7 +166,7 @@ class DependencyManager:
                 cycle_path = " → ".join(cycle)
                 raise ValueError(f"Circular dependency detected: {cycle_path}")
 
-        logger.debug("Component %s waiting for %s", requester, component_name)
+        logger.debug("Component `%s` waiting for `%s`", requester, component_name)
 
         # Wait for the component to be ready
         await event.wait()
@@ -239,7 +239,7 @@ class DependencyManager:
         # Wake up any waiters (with lock protection)
         async with self._ready_events_lock:
             if component_name in self._ready_events:
-                logger.debug("Component %s ready, waking up waiters", component_name)
+                logger.debug("Component `%s` ready, waking up waiters", component_name)
                 self._ready_events[component_name].set()
 
     async def mark_component_failed(self, component_name: str, error: Exception):
@@ -268,7 +268,7 @@ class DependencyManager:
         # Wake up any waiters (they will get the error) (with lock protection)
         async with self._ready_events_lock:
             if component_name in self._ready_events:
-                logger.debug("Component %s failed, waking up waiters", component_name)
+                logger.debug("Component `%s` failed, waking up waiters", component_name)
                 self._ready_events[component_name].set()
 
     def get_component_state(self, component_name: str) -> ComponentState | None:
@@ -443,18 +443,18 @@ class DependencyManager:
             # Mark as building
             await self.mark_component_building(component_name, config)
 
-            logger.debug("Starting to build %s component: %s", component_group.value, component_name)
+            logger.debug("Starting to build `%s` component: `%s`", component_group.value, component_name)
 
             # Build the component
             instance = await build_fn(component_name, config)
 
             # Mark as ready
             await self.mark_component_ready(component_name, instance)
-            logger.debug("Successfully built %s component: %s", component_group.value, component_name)
+            logger.debug("Successfully built `%s` component: `%s`", component_group.value, component_name)
 
         except DependencyNotReadyError as e:
             # Wait for the dependency and retry once (no loop needed)
-            logger.debug("Component %s waiting for dependency %s", component_name, e.dependency_name)
+            logger.debug("Component `%s` waiting for dependency `%s`", component_name, e.dependency_name)
             await self.wait_for_component(e.dependency_name, component_name)
 
             # Retry the build once after dependency is ready
@@ -462,5 +462,9 @@ class DependencyManager:
 
         except Exception as e:
             # Handle all other errors
-            logger.error("Failed to build %s component %s: %s", component_group.value, component_name, e, exc_info=True)
+            logger.error("Failed to build `%s` component `%s`: %s",
+                         component_group.value,
+                         component_name,
+                         e,
+                         exc_info=True)
             await self.mark_component_failed(component_name, e)

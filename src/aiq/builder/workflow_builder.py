@@ -919,7 +919,7 @@ class AsyncChildBuilder(Builder):
 
         # Use dependency manager to check if component is defined
         if self._parent_builder._dependency_manager.is_component_defined(name):
-            logger.debug("Component %s waiting for function %s", self._requester_name, name)
+            logger.debug("Component `%s` waiting for function `%s`", self._requester_name, name)
             from aiq.builder.exceptions import DependencyNotReadyError
             raise DependencyNotReadyError(f"Function `{name}` is not ready yet", name)
 
@@ -967,7 +967,7 @@ class AsyncChildBuilder(Builder):
             # If component is defined in configuration, this is normal building flow
             if self._parent_builder._dependency_manager.is_component_defined(fn_name):
                 # This is normal during parallel building - wait briefly and retry
-                logger.debug("Component %s waiting for function %s", self._requester_name, fn_name)
+                logger.debug("Component `%s` waiting for function `%s`", self._requester_name, fn_name)
 
                 # Since we're in an async context, we need to handle this gracefully
                 # Create a special exception that indicates dependency waiting (not an error)
@@ -995,7 +995,7 @@ class AsyncChildBuilder(Builder):
         # If component is defined in configuration, this is normal building flow
         if self._parent_builder._dependency_manager.is_component_defined(fn_name):
             # This is normal during parallel building - signal dependency waiting
-            logger.debug("Component %s waiting for function %s", self._requester_name, fn_name)
+            logger.debug("Component `%s` waiting for function `%s`", self._requester_name, fn_name)
             from aiq.builder.exceptions import DependencyNotReadyError
             raise DependencyNotReadyError(f"Function `{fn_name}` is not ready yet", fn_name)
 

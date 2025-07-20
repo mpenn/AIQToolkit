@@ -44,3 +44,4 @@ class ComponentGroup(StrEnum):
     LLMS = "llms"
     MEMORY = "memory"
     RETRIEVERS = "retrievers"
+    TRACING = "tracing"

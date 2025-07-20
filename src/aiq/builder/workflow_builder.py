@@ -304,21 +304,33 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Use dependency manager to check component state
         state = self._dependency_manager.get_component_state(name)
-        if state == ComponentState.FAILED:
-            # Re-raise the original exception for backward compatibility
-            error = self._dependency_manager.get_component_error(name)
-            raise error or RuntimeError(f"Function '{name}' failed to build")
-        elif state == ComponentState.BUILDING:
-            # Wait for the component using async patterns
-            try:
-                asyncio.get_running_loop()
-                # We're in an async context, can't use asyncio.run()
-                raise ValueError(f"Function `{name}` is still building. "
-                                 f"Use await get_function_async() for better performance.")
-            except RuntimeError:
-                # We're not in an async context, can use asyncio.run()
-                logger.debug("Function `%s` is building, waiting synchronously...", name)
-                return asyncio.run(self.get_function_async(name, "get_function_sync"))
+        match state:
+            case ComponentState.FAILED:
+                # Re-raise the original exception for backward compatibility
+                error = self._dependency_manager.get_component_error(name)
+                raise error or RuntimeError(f"Function '{name}' failed to build")
+            case ComponentState.BUILDING:
+                # Wait for the component using async patterns
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise ValueError(f"Function `{name}` is still building. "
+                                     f"Use await get_function_async() for better performance.")
+                except RuntimeError:
+                    # We're not in an async context, can use asyncio.run()
+                    logger.debug("Function `%s` is building, waiting synchronously...", name)
+                    return asyncio.run(self.get_function_async(name, "get_function_sync"))
+            case ComponentState.PENDING:
+                # Component is registered but not yet building - still need to wait
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise ValueError(f"Function `{name}` is not ready yet. "
+                                     f"Use await get_function_async() for better performance.")
+                except RuntimeError:
+                    # We're not in an async context, can use asyncio.run()
+                    logger.debug("Function `%s` not ready yet, waiting...", name)
+                    return asyncio.run(self.get_function_async(name, "get_function_sync"))
 
         # If component is defined in configuration, wait for it (normal building flow)
         if self._dependency_manager.is_component_defined(name):
@@ -399,21 +411,33 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Use dependency manager to check component state
         state = self._dependency_manager.get_component_state(fn_name)
-        if state == ComponentState.FAILED:
-            # Re-raise the original exception for backward compatibility
-            error = self._dependency_manager.get_component_error(fn_name)
-            raise error or RuntimeError(f"Function '{fn_name}' failed to build")
-        elif state == ComponentState.BUILDING:
-            # Wait for the component using async patterns
-            try:
-                asyncio.get_running_loop()
-                # We're in an async context, can't use asyncio.run()
-                raise ValueError(f"Function `{fn_name}` is still building. "
-                                 f"Use await get_tool_async() for better performance.")
-            except RuntimeError:
-                # We're not in an async context, can use asyncio.run()
-                logger.debug("Function `%s` is building, waiting synchronously...", fn_name)
-                return asyncio.run(self.get_tool_async(fn_name, wrapper_type, "get_tool_sync"))
+        match state:
+            case ComponentState.FAILED:
+                # Re-raise the original exception for backward compatibility
+                error = self._dependency_manager.get_component_error(fn_name)
+                raise error or RuntimeError(f"Function '{fn_name}' failed to build")
+            case ComponentState.BUILDING:
+                # Wait for the component using async patterns
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise ValueError(f"Function `{fn_name}` is still building. "
+                                     f"Use await get_tool_async() for better performance.")
+                except RuntimeError:
+                    # We're not in an async context, can use asyncio.run()
+                    logger.debug("Function `%s` is building, waiting synchronously...", fn_name)
+                    return asyncio.run(self.get_tool_async(fn_name, wrapper_type, "get_tool_sync"))
+            case ComponentState.PENDING:
+                # Component is registered but not yet building - still need to wait
+                try:
+                    asyncio.get_running_loop()  # type: ignore
+                    # We're in an async context, can't use asyncio.run()
+                    raise ValueError(f"Function `{fn_name}` is not ready yet. "
+                                     f"Use await get_tool_async() for better performance.")
+                except RuntimeError:
+                    # We're not in an async context, can use asyncio.run()
+                    logger.debug("Function `%s` not ready yet, waiting...", fn_name)
+                    return asyncio.run(self.get_tool_async(fn_name, wrapper_type, "get_tool_sync"))
 
         # If component is defined in configuration, wait for it (normal building flow)
         if self._dependency_manager.is_component_defined(fn_name):
@@ -546,29 +570,49 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Use dependency manager to check component state
         state = self._dependency_manager.get_component_state(memory_name)
-        if state == ComponentState.FAILED:
-            # Re-raise the original exception for backward compatibility
-            error = self._dependency_manager.get_component_error(memory_name)
-            raise error or RuntimeError(f"Memory '{memory_name}' failed to build")
-        elif state == ComponentState.BUILDING:
-            # Try to wait for the component using async patterns
-            try:
-                # Check if we're in an async context
+        match state:
+            case ComponentState.FAILED:
+                # Re-raise the original exception for backward compatibility
+                error = self._dependency_manager.get_component_error(memory_name)
+                raise error or RuntimeError(f"Memory '{memory_name}' failed to build")
+            case ComponentState.BUILDING:
+                # Try to wait for the component using async patterns
                 try:
-                    asyncio.get_running_loop()
-                    # We're in an async context, can't use asyncio.run()
+                    # Check if we're in an async context
+                    try:
+                        asyncio.get_running_loop()
+                        # We're in an async context, can't use asyncio.run()
+                        raise ValueError(f"Memory `{memory_name}` is still building. "
+                                         f"Use await get_memory_client_async() for better performance "
+                                         f"in async context.")
+                    except RuntimeError:
+                        # We're not in an async context, can use asyncio.run()
+                        logger.debug("Memory `%s` is building, waiting synchronously...", memory_name)
+                        return asyncio.run(self.get_memory_client_async(memory_name, "get_memory_client_sync"))
+                except Exception as e:
+                    logger.error("Error waiting for memory `%s`", memory_name, exc_info=True)
                     raise ValueError(f"Memory `{memory_name}` is still building. "
-                                     f"Use await get_memory_client_async() for better performance "
-                                     f"in async context.")
-                except RuntimeError:
-                    # We're not in an async context, can use asyncio.run()
-                    logger.debug("Memory `%s` is building, waiting synchronously...", memory_name)
-                    return asyncio.run(self.get_memory_client_async(memory_name, "get_memory_client_sync"))
-            except Exception as e:
-                logger.error("Error waiting for memory `%s`", memory_name, exc_info=True)
-                raise ValueError(f"Memory `{memory_name}` is still building. "
-                                 f"Consider using await add_memory_client() or "
-                                 f"get_memory_client_async() for better performance.") from e
+                                     f"Consider using await add_memory_client() or "
+                                     f"get_memory_client_async() for better performance.") from e
+            case ComponentState.PENDING:
+                # Component is registered but not yet building - still need to wait
+                try:
+                    # Check if we're in an async context
+                    try:
+                        asyncio.get_running_loop()
+                        # We're in an async context, can't use asyncio.run()
+                        raise ValueError(f"Memory `{memory_name}` is not ready yet. "
+                                         f"Use await get_memory_client_async() for better performance "
+                                         f"in async context.")
+                    except RuntimeError:
+                        # We're not in an async context, can use asyncio.run()
+                        logger.debug("Memory `%s` not ready yet, waiting...", memory_name)
+                        return asyncio.run(self.get_memory_client_async(memory_name, "get_memory_client_sync"))
+                except Exception as e:
+                    logger.error("Error waiting for memory `%s`", memory_name, exc_info=True)
+                    raise ValueError(f"Memory `{memory_name}` is not ready yet. "
+                                     f"Consider using await add_memory_client() or "
+                                     f"get_memory_client_async() for better performance.") from e
 
         raise ValueError(f"Memory `{memory_name}` not found")
 
@@ -619,7 +663,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
             raise e
 
     @override
-    async def get_retriever_config(self, retriever_name: str | RetrieverRef) -> RetrieverBaseConfig:
+    def get_retriever_config(self, retriever_name: str | RetrieverRef) -> RetrieverBaseConfig:
         if retriever_name not in self._retrievers:
             raise ValueError(f"Retriever `{retriever_name}` not found")
         return self._retrievers[retriever_name].config
@@ -825,7 +869,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Check for any failures
         failures = []
-        for i, result in enumerate(results):
+        for _, result in enumerate(results):
             if isinstance(result, Exception):
                 failures.append(result)
 
@@ -1022,8 +1066,8 @@ class AsyncChildBuilder(Builder):
         return retriever
 
     @override
-    async def get_retriever_config(self, retriever_name: str) -> RetrieverBaseConfig:
-        return await self._parent_builder.get_retriever_config(retriever_name)
+    def get_retriever_config(self, retriever_name: str) -> RetrieverBaseConfig:
+        return self._parent_builder.get_retriever_config(retriever_name)
 
     @override
     def get_user_manager(self) -> UserManagerHolder:

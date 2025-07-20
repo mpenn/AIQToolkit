@@ -165,15 +165,18 @@ class Builder(ABC):  # pylint: disable=too-many-public-methods
         return list(retrievers)
 
     @typing.overload
+    @abstractmethod
     async def get_retriever(self, retriever_name: str | RetrieverRef,
                             wrapper_type: LLMFrameworkEnum | str) -> typing.Any:
         ...
 
     @typing.overload
+    @abstractmethod
     async def get_retriever(self, retriever_name: str | RetrieverRef, wrapper_type: None) -> AIQRetriever:
         ...
 
     @typing.overload
+    @abstractmethod
     async def get_retriever(self, retriever_name: str | RetrieverRef) -> AIQRetriever:
         ...
 
@@ -184,7 +187,7 @@ class Builder(ABC):  # pylint: disable=too-many-public-methods
         pass
 
     @abstractmethod
-    async def get_retriever_config(self, retriever_name: str | RetrieverRef) -> RetrieverBaseConfig:
+    def get_retriever_config(self, retriever_name: str | RetrieverRef) -> RetrieverBaseConfig:
         pass
 
     @abstractmethod

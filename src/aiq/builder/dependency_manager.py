@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class ComponentState(Enum):
     """Component build state"""
+    PENDING = "pending"
     BUILDING = "building"
     READY = "ready"
     FAILED = "failed"
@@ -112,15 +113,25 @@ class DependencyManager:
             RuntimeError: If component failed to build
             ValueError: If component is not defined in configuration
         """
-        # Check if component is already ready (with lock protection)
+        # Check if component is already ready or failed (with lock protection)
         async with self._component_info_lock:
             if component_name in self._component_info:
                 info = self._component_info[component_name]
-                if info.state == ComponentState.READY:
-                    return info.instance
-                elif info.state == ComponentState.FAILED:
-                    # Re-raise the original exception for backward compatibility
-                    raise info.error or RuntimeError(f"Component '{component_name}' failed to build")
+                match info.state:
+                    case ComponentState.READY:
+                        return info.instance
+                    case ComponentState.FAILED:
+                        # Re-raise the original exception for backward compatibility
+                        raise info.error or RuntimeError(f"Component '{component_name}' failed to build")
+                    case ComponentState.BUILDING:
+                        # Component is currently building - continue to wait
+                        pass
+                    case ComponentState.PENDING:
+                        # Component is registered but not yet building - continue to wait
+                        pass
+                    case _:
+                        # Unknown state - this should not happen
+                        raise RuntimeError(f"Component '{component_name}' is in unknown state: {info.state}")
 
         # Check if component is defined in configuration (no race condition)
         if not self.is_component_defined(component_name):
@@ -135,16 +146,25 @@ class DependencyManager:
 
             # Track who's waiting for this component (with lock protection)
         async with self._component_info_lock:
-            if component_name in self._component_info:
-                # Add waiter FIRST, then check for cycles
-                # This ensures we detect cycles even with concurrent waits
-                self._component_info[component_name].waiters.add(requester)
+            # Ensure we have a ComponentInfo entry to track waiters and detect cycles
+            # even if the component hasn't started building yet
+            if component_name not in self._component_info:
+                # Create a minimal ComponentInfo entry for dependency tracking
+                self._component_info[component_name] = ComponentInfo(
+                    name=component_name,
+                    config=None,  # Will be set later when building starts
+                    state=ComponentState.PENDING  # New state for registered but not building
+                )
 
-                # Check for circular dependency after adding to waiters
-                cycle = self._detect_dependency_cycle(component_name, requester)
-                if cycle:
-                    cycle_path = " → ".join(cycle)
-                    raise ValueError(f"Circular dependency detected: {cycle_path}")
+            # Add waiter FIRST, then check for cycles
+            # This ensures we detect cycles even with concurrent waits
+            self._component_info[component_name].waiters.add(requester)
+
+            # Check for circular dependency after adding to waiters
+            cycle = self._detect_dependency_cycle(component_name, requester)
+            if cycle:
+                cycle_path = " → ".join(cycle)
+                raise ValueError(f"Circular dependency detected: {cycle_path}")
 
         logger.debug("Component %s waiting for %s", requester, component_name)
 
@@ -155,11 +175,21 @@ class DependencyManager:
         async with self._component_info_lock:
             if component_name in self._component_info:
                 info = self._component_info[component_name]
-                if info.state == ComponentState.READY:
-                    return info.instance
-                elif info.state == ComponentState.FAILED:
-                    # Re-raise the original exception for backward compatibility
-                    raise info.error or RuntimeError(f"Component '{component_name}' failed to build")
+                match info.state:
+                    case ComponentState.READY:
+                        return info.instance
+                    case ComponentState.FAILED:
+                        # Re-raise the original exception for backward compatibility
+                        raise info.error or RuntimeError(f"Component '{component_name}' failed to build")
+                    case ComponentState.BUILDING:
+                        # Component is currently building - continue to wait
+                        pass
+                    case ComponentState.PENDING:
+                        # Component is registered but not yet building - continue to wait
+                        pass
+                    case _:
+                        # Unknown state - this should not happen
+                        raise RuntimeError(f"Component '{component_name}' is in unknown state: {info.state}")
 
         raise RuntimeError(f"Component {component_name} is not ready after waiting")
 
@@ -171,9 +201,20 @@ class DependencyManager:
             config (Any): The configuration of the component
         """
         async with self._component_info_lock:
-            self._component_info[component_name] = ComponentInfo(name=component_name,
-                                                                 config=config,
-                                                                 state=ComponentState.BUILDING)
+            # If component already exists (e.g., was created during cycle detection),
+            # preserve existing waiters and just update state and config
+            if component_name in self._component_info:
+                existing_info = self._component_info[component_name]
+                self._component_info[component_name] = ComponentInfo(
+                    name=component_name,
+                    config=config,
+                    state=ComponentState.BUILDING,
+                    waiters=existing_info.waiters  # Preserve existing waiters
+                )
+            else:
+                self._component_info[component_name] = ComponentInfo(name=component_name,
+                                                                     config=config,
+                                                                     state=ComponentState.BUILDING)
 
     async def mark_component_ready(self, component_name: str, instance: Any):
         """
@@ -297,8 +338,7 @@ class DependencyManager:
         if cycle_path:
             # We found a cycle! Format it nicely
             return [requester] + cycle_path
-        else:
-            return None
+        return None
 
     def get_component_instance(self, component_name: str) -> Any | None:
         """Get the instance of a ready component, if available.

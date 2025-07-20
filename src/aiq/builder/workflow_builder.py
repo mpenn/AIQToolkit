@@ -66,7 +66,6 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class ConfiguredTelemetryExporter:
-class ConfiguredTelemetryExporter:
     config: TelemetryExporterBaseConfig
     instance: BaseExporter
 
@@ -640,6 +639,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
             name (str): The name of the telemetry exporter
             config (TelemetryExporterBaseConfig): The configuration for the exporter
         """
+
     async def add_logging_handler(self, name: str, config: LoggingBaseConfig):
         logging_info = self._registry.get_logging_method(type(config))
         handler = await self._get_exit_stack().enter_async_context(logging_info.build_fn(config, self))
@@ -659,7 +659,6 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         exporter_context_manager = exporter_info.build_fn(config, self)
 
         # Only protect the shared state modifications (serialized)
-        async with self._telemetry_exporters_lock:
         async with self._telemetry_exporters_lock:
             exporter = await self._get_exit_stack().enter_async_context(exporter_context_manager)
             self._telemetry_exporters[name] = ConfiguredTelemetryExporter(config=config, instance=exporter)
@@ -729,7 +728,6 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         return workflow
 
->>>>>>> mpenn_observability-redesign
     async def populate_builder(self, config: AIQConfig, skip_workflow: bool = False):
         """
         Populate the builder with all components from the configuration.

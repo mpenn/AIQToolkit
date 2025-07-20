@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class ConfiguredTelemetryExporter:
+class ConfiguredTelemetryExporter:
     config: TelemetryExporterBaseConfig
     instance: BaseExporter
 
@@ -632,6 +633,13 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
     def get_user_manager(self) -> UserManagerHolder:
         return UserManagerHolder(context=AIQContext(self._context_state))
 
+    async def add_telemetry_exporter(self, name: str, config: TelemetryExporterBaseConfig) -> None:
+        """Add an configured telemetry exporter to the builder.
+
+        Args:
+            name (str): The name of the telemetry exporter
+            config (TelemetryExporterBaseConfig): The configuration for the exporter
+        """
     async def add_logging_handler(self, name: str, config: LoggingBaseConfig):
         logging_info = self._registry.get_logging_method(type(config))
         handler = await self._get_exit_stack().enter_async_context(logging_info.build_fn(config, self))
@@ -652,7 +660,9 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         # Only protect the shared state modifications (serialized)
         async with self._telemetry_exporters_lock:
+        async with self._telemetry_exporters_lock:
             exporter = await self._get_exit_stack().enter_async_context(exporter_context_manager)
+            self._telemetry_exporters[name] = ConfiguredTelemetryExporter(config=config, instance=exporter)
             self._telemetry_exporters[name] = ConfiguredTelemetryExporter(config=config, instance=exporter)
 
     def build(self, entry_function: str | None = None) -> Workflow:
@@ -719,6 +729,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
         return workflow
 
+>>>>>>> mpenn_observability-redesign
     async def populate_builder(self, config: AIQConfig, skip_workflow: bool = False):
         """
         Populate the builder with all components from the configuration.

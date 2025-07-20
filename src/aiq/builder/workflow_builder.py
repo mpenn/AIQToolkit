@@ -133,8 +133,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         self._logging_handlers: dict[str, logging.Handler] = {}
 
         # Locks for thread-safe access to shared data structures
-        self._logging_handlers_lock = asyncio.Lock()
-        self._telemetry_exporters_lock = asyncio.Lock()
+        self._logging_handlers_lock = asyncio.Lock()  # Only logging handlers still need manual coordination
 
         # Context and dependencies
         self._context_state = AIQContextState.get()
@@ -151,9 +150,6 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         await asyncio.gather(
             *
             [self.add_logging_handler(key, logging_config) for key, logging_config in telemetry_config.logging.items()])
-
-        # Note: Telemetry exporters are now built in parallel with other components
-        # in populate_builder for better performance
 
         return self
 
@@ -632,14 +628,6 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
     def get_user_manager(self) -> UserManagerHolder:
         return UserManagerHolder(context=AIQContext(self._context_state))
 
-    async def add_telemetry_exporter(self, name: str, config: TelemetryExporterBaseConfig) -> None:
-        """Add an configured telemetry exporter to the builder.
-
-        Args:
-            name (str): The name of the telemetry exporter
-            config (TelemetryExporterBaseConfig): The configuration for the exporter
-        """
-
     async def add_logging_handler(self, name: str, config: LoggingBaseConfig):
         logging_info = self._registry.get_logging_method(type(config))
         handler = await self._get_exit_stack().enter_async_context(logging_info.build_fn(config, self))
@@ -652,17 +640,24 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
             logging.getLogger().addHandler(handler)
 
     async def add_telemetry_exporter(self, name: str, config: TelemetryExporterBaseConfig) -> None:
-        """Add a telemetry exporter to the builder"""
-        exporter_info = self._registry.get_telemetry_exporter(type(config))
+        """Add an configured telemetry exporter to the builder.
 
-        # Build the exporter outside the lock (parallel)
-        exporter_context_manager = exporter_info.build_fn(config, self)
+        Args:
+            name (str): The name of the telemetry exporter
+            config (TelemetryExporterBaseConfig): The configuration for the exporter
+        """
+        if name in self._telemetry_exporters:
+            raise ValueError(f"Telemetry exporter `{name}` already exists in the list of telemetry exporters")
 
-        # Only protect the shared state modifications (serialized)
-        async with self._telemetry_exporters_lock:
-            exporter = await self._get_exit_stack().enter_async_context(exporter_context_manager)
-            self._telemetry_exporters[name] = ConfiguredTelemetryExporter(config=config, instance=exporter)
-            self._telemetry_exporters[name] = ConfiguredTelemetryExporter(config=config, instance=exporter)
+        # Register component with dependency manager
+        self._dependency_manager.register_component(name, ComponentGroup.TRACING)
+
+        # Start building the telemetry exporter asynchronously
+        self._dependency_manager.start_component_build(
+            name, lambda: self._build_component_coordinated(name, ComponentGroup.TRACING, config))
+
+        # Wait for it to complete
+        await self._dependency_manager.wait_for_component(name, "add_telemetry_exporter")
 
     def build(self, entry_function: str | None = None) -> Workflow:
         """Build the workflow from the configured components"""

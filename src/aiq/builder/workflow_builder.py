@@ -25,10 +25,10 @@ from typing import Any
 
 from aiq.builder.builder import Builder
 from aiq.builder.builder import UserManagerHolder
+from aiq.builder.component_build_manager import ComponentBuildManager
+from aiq.builder.component_build_manager import ComponentState
 from aiq.builder.context import AIQContext
 from aiq.builder.context import AIQContextState
-from aiq.builder.dependency_manager import ComponentState
-from aiq.builder.dependency_manager import DependencyManager
 from aiq.builder.embedder import EmbedderProviderInfo
 from aiq.builder.framework_enum import LLMFrameworkEnum
 from aiq.builder.function import Function
@@ -106,7 +106,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
     for backwards compatibility while using dynamic dependency resolution internally.
 
     All components are built in parallel and pause when they need dependencies
-    that aren't ready yet, using asyncio events for coordination managed by DependencyManager.
+    that aren't ready yet, using asyncio events for coordination managed by ComponentBuildManager.
     """
 
     def __init__(self, *, general_config: GeneralConfig | None = None, registry: TypeRegistry | None = None):
@@ -120,7 +120,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         self._registry = registry
 
         # Dependency management - the core of this refactor
-        self._dependency_manager = DependencyManager()
+        self._component_build_manager = ComponentBuildManager()
 
         # Storage for completed components
         self._functions: dict[str, ConfiguredFunction] = {}
@@ -156,8 +156,8 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
     async def __aexit__(self, *exc_details):
         assert self._exit_stack is not None, "Exit stack not initialized"
 
-        # Use dependency manager to cancel all build tasks
-        await self._dependency_manager.cancel_all_build_tasks()
+        # Use component build manager to cancel all build tasks
+        await self._component_build_manager.cancel_all_build_tasks()
 
         # Clean up logging handlers
         async with self._logging_handlers_lock:
@@ -251,9 +251,9 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         self._telemetry_exporters[name] = configured_exporter
         return configured_exporter
 
-    # Component building wrapper that uses DependencyManager
+    # Component building wrapper that uses ComponentBuildManager
     async def _build_component_coordinated(self, component_name: str, component_group: ComponentGroup, config: Any):
-        """Build a component using dependency manager coordination."""
+        """Build a component using component build manager coordination."""
 
         async def build_fn(name: str, cfg: Any) -> Any:
             """Inner build function that calls the appropriate internal builder."""
@@ -273,27 +273,27 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
                 case _:
                     raise ValueError(f"Unknown component group: {component_group}")
 
-        await self._dependency_manager.build_component_with_coordination(component_name,
-                                                                         component_group,
-                                                                         config,
-                                                                         build_fn)
+        await self._component_build_manager.build_component_with_coordination(component_name,
+                                                                              component_group,
+                                                                              config,
+                                                                              build_fn)
 
-    # Backwards compatible synchronous interface using DependencyManager
+    # Backwards compatible synchronous interface using ComponentBuildManager
     @override
     async def add_function(self, name: str | FunctionRef, config: FunctionBaseConfig) -> Function:
         """Add a function and start building it immediately"""
         if name in self._functions:
             raise ValueError(f"Function `{name}` already exists in the list of functions")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.FUNCTIONS)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.FUNCTIONS)
 
         # Start building the function asynchronously using cleaner API
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.FUNCTIONS, config))
 
         # Wait for it to complete and return the instance
-        configured_function = await self._dependency_manager.wait_for_component(name, "add_function")
+        configured_function = await self._component_build_manager.wait_for_component(name, "add_function")
         return configured_function.instance
 
     @override
@@ -302,12 +302,12 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._functions:
             return self._functions[name].instance
 
-        # Use dependency manager to check component state
-        state = self._dependency_manager.get_component_state(name)
+        # Use component build manager to check component state
+        state = self._component_build_manager.get_component_state(name)
         match state:
             case ComponentState.FAILED:
                 # Re-raise the original exception for backward compatibility
-                error = self._dependency_manager.get_component_error(name)
+                error = self._component_build_manager.get_component_error(name)
                 raise error or RuntimeError(f"Function '{name}' failed to build")
             case ComponentState.BUILDING:
                 # Wait for the component using async patterns
@@ -333,7 +333,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
                     return asyncio.run(self.get_function_async(name, "get_function_sync"))
 
         # If component is defined in configuration, wait for it (normal building flow)
-        if self._dependency_manager.is_component_defined(name):
+        if self._component_build_manager.is_component_defined(name):
             try:
                 asyncio.get_running_loop()
                 # We're in an async context, can't use asyncio.run()
@@ -349,7 +349,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
     async def get_function_async(self, name: str | FunctionRef, requester: str = "unknown") -> Function:
         """Get a function asynchronously, waiting if necessary"""
-        configured_function = await self._dependency_manager.wait_for_component(name, requester)
+        configured_function = await self._component_build_manager.wait_for_component(name, requester)
         return configured_function.instance
 
     @override
@@ -364,19 +364,19 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if self._workflow is not None:
             warnings.warn("Overwriting existing workflow")
 
-        # Clear previous workflow state using dependency manager
-        self._dependency_manager.clear_component_state("<workflow>")
-        await self._dependency_manager.cancel_build_task("<workflow>")
+        # Clear previous workflow state using component build manager
+        self._component_build_manager.clear_component_state("<workflow>")
+        await self._component_build_manager.cancel_build_task("<workflow>")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component("<workflow>", ComponentGroup.FUNCTIONS)
+        # Register component with component build manager
+        self._component_build_manager.register_component("<workflow>", ComponentGroup.FUNCTIONS)
 
         # Start building the workflow asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             "<workflow>", lambda: self._build_component_coordinated("<workflow>", ComponentGroup.FUNCTIONS, config))
 
         # Wait for it to complete
-        configured_function = await self._dependency_manager.wait_for_component("<workflow>", "set_workflow")
+        configured_function = await self._component_build_manager.wait_for_component("<workflow>", "set_workflow")
         self._workflow = configured_function
         return configured_function.instance
 
@@ -409,12 +409,12 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
                 logger.error("Error fetching tool `%s`", fn_name, exc_info=True)
                 raise e
 
-        # Use dependency manager to check component state
-        state = self._dependency_manager.get_component_state(fn_name)
+        # Use component build manager to check component state
+        state = self._component_build_manager.get_component_state(fn_name)
         match state:
             case ComponentState.FAILED:
                 # Re-raise the original exception for backward compatibility
-                error = self._dependency_manager.get_component_error(fn_name)
+                error = self._component_build_manager.get_component_error(fn_name)
                 raise error or RuntimeError(f"Function '{fn_name}' failed to build")
             case ComponentState.BUILDING:
                 # Wait for the component using async patterns
@@ -440,7 +440,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
                     return asyncio.run(self.get_tool_async(fn_name, wrapper_type, "get_tool_sync"))
 
         # If component is defined in configuration, wait for it (normal building flow)
-        if self._dependency_manager.is_component_defined(fn_name):
+        if self._component_build_manager.is_component_defined(fn_name):
             try:
                 asyncio.get_running_loop()
                 # We're in an async context, can't use asyncio.run()
@@ -460,7 +460,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
                              requester: str = "unknown"):
         """Get a tool asynchronously, waiting if necessary"""
         # Wait for the function to be ready
-        configured_function = await self._dependency_manager.wait_for_component(fn_name, requester)
+        configured_function = await self._component_build_manager.wait_for_component(fn_name, requester)
 
         try:
             tool_wrapper_reg = self._registry.get_tool_wrapper(llm_framework=wrapper_type)
@@ -475,20 +475,20 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._llms:
             raise ValueError(f"LLM `{name}` already exists in the list of LLMs")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.LLMS)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.LLMS)
 
         # Start building the LLM asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.LLMS, config))
 
         # Wait for it to complete
-        await self._dependency_manager.wait_for_component(name, "add_llm")
+        await self._component_build_manager.wait_for_component(name, "add_llm")
 
     @override
     async def get_llm(self, llm_name: str | LLMRef, wrapper_type: LLMFrameworkEnum | str):
         """Get an LLM, waiting if it's not ready yet"""
-        configured_llm = await self._dependency_manager.wait_for_component(llm_name, f"get_llm({wrapper_type})")
+        configured_llm = await self._component_build_manager.wait_for_component(llm_name, f"get_llm({wrapper_type})")
 
         try:
             # Generate wrapped client from registered client info
@@ -512,21 +512,21 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._embedders:
             raise ValueError(f"Embedder `{name}` already exists in the list of embedders")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.EMBEDDERS)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.EMBEDDERS)
 
         # Start building the embedder asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.EMBEDDERS, config))
 
         # Wait for it to complete
-        await self._dependency_manager.wait_for_component(name, "add_embedder")
+        await self._component_build_manager.wait_for_component(name, "add_embedder")
 
     @override
     async def get_embedder(self, embedder_name: str | EmbedderRef, wrapper_type: LLMFrameworkEnum | str):
         """Get an embedder, waiting if it's not ready yet"""
-        configured_embedder = await self._dependency_manager.wait_for_component(embedder_name,
-                                                                                f"get_embedder({wrapper_type})")
+        configured_embedder = await self._component_build_manager.wait_for_component(
+            embedder_name, f"get_embedder({wrapper_type})")
 
         try:
             # Generate wrapped client from registered client info
@@ -551,15 +551,15 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._memory_clients:
             raise ValueError(f"Memory `{name}` already exists in the list of memories")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.MEMORY)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.MEMORY)
 
         # Start building the memory client asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.MEMORY, config))
 
         # Wait for it to complete and return the instance
-        configured_memory = await self._dependency_manager.wait_for_component(name, "add_memory_client")
+        configured_memory = await self._component_build_manager.wait_for_component(name, "add_memory_client")
         return configured_memory.instance
 
     @override
@@ -568,12 +568,12 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if memory_name in self._memory_clients:
             return self._memory_clients[memory_name].instance
 
-        # Use dependency manager to check component state
-        state = self._dependency_manager.get_component_state(memory_name)
+        # Use component build manager to check component state
+        state = self._component_build_manager.get_component_state(memory_name)
         match state:
             case ComponentState.FAILED:
                 # Re-raise the original exception for backward compatibility
-                error = self._dependency_manager.get_component_error(memory_name)
+                error = self._component_build_manager.get_component_error(memory_name)
                 raise error or RuntimeError(f"Memory '{memory_name}' failed to build")
             case ComponentState.BUILDING:
                 # Try to wait for the component using async patterns
@@ -618,7 +618,7 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 
     async def get_memory_client_async(self, memory_name: str | MemoryRef, requester: str = "unknown") -> MemoryEditor:
         """Get a memory client asynchronously, waiting if necessary"""
-        configured_memory = await self._dependency_manager.wait_for_component(memory_name, requester)
+        configured_memory = await self._component_build_manager.wait_for_component(memory_name, requester)
         return configured_memory.instance
 
     @override
@@ -633,23 +633,23 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._retrievers:
             raise ValueError(f"Retriever '{name}' already exists in the list of retrievers")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.RETRIEVERS)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.RETRIEVERS)
 
         # Start building the retriever asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.RETRIEVERS, config))
 
         # Wait for it to complete
-        await self._dependency_manager.wait_for_component(name, "add_retriever")
+        await self._component_build_manager.wait_for_component(name, "add_retriever")
 
     @override
     async def get_retriever(self,
                             retriever_name: str | RetrieverRef,
                             wrapper_type: LLMFrameworkEnum | str | None = None):
         """Get a retriever, waiting if it's not ready yet"""
-        configured_retriever = await self._dependency_manager.wait_for_component(retriever_name,
-                                                                                 f"get_retriever({wrapper_type})")
+        configured_retriever = await self._component_build_manager.wait_for_component(
+            retriever_name, f"get_retriever({wrapper_type})")
 
         try:
             # Generate wrapped client from registered client info
@@ -693,15 +693,15 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
         if name in self._telemetry_exporters:
             raise ValueError(f"Telemetry exporter `{name}` already exists in the list of telemetry exporters")
 
-        # Register component with dependency manager
-        self._dependency_manager.register_component(name, ComponentGroup.TRACING)
+        # Register component with component build manager
+        self._component_build_manager.register_component(name, ComponentGroup.TRACING)
 
         # Start building the telemetry exporter asynchronously
-        self._dependency_manager.start_component_build(
+        self._component_build_manager.start_component_build(
             name, lambda: self._build_component_coordinated(name, ComponentGroup.TRACING, config))
 
         # Wait for it to complete
-        await self._dependency_manager.wait_for_component(name, "add_telemetry_exporter")
+        await self._component_build_manager.wait_for_component(name, "add_telemetry_exporter")
 
     def build(self, entry_function: str | None = None) -> Workflow:
         """Build the workflow from the configured components"""
@@ -795,70 +795,70 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
             tracing_count,
             ", 1 workflow" if not skip_workflow else "")
 
-        # Register all components with dependency manager
+        # Register all components with component build manager
         for name in config.llms.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.LLMS)
+            self._component_build_manager.register_component(name, ComponentGroup.LLMS)
         for name in config.embedders.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.EMBEDDERS)
+            self._component_build_manager.register_component(name, ComponentGroup.EMBEDDERS)
         for name in config.memory.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.MEMORY)
+            self._component_build_manager.register_component(name, ComponentGroup.MEMORY)
         for name in config.retrievers.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.RETRIEVERS)
+            self._component_build_manager.register_component(name, ComponentGroup.RETRIEVERS)
         for name in config.functions.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.FUNCTIONS)
+            self._component_build_manager.register_component(name, ComponentGroup.FUNCTIONS)
         # Register exporters for parallel building
         for name in config.general.telemetry.tracing.keys():
-            self._dependency_manager.register_component(name, ComponentGroup.TRACING)
+            self._component_build_manager.register_component(name, ComponentGroup.TRACING)
         if not skip_workflow:
-            self._dependency_manager.register_component("<workflow>", ComponentGroup.FUNCTIONS)
+            self._component_build_manager.register_component("<workflow>", ComponentGroup.FUNCTIONS)
 
         # Start all components building in parallel
         build_tasks = []
 
         # Start LLMs
         for name, llm_config in config.llms.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name, lambda cfg=llm_config, n=name: self._build_component_coordinated(n, ComponentGroup.LLMS, cfg))
             build_tasks.append(task)
 
         # Start embedders
         for name, embedder_config in config.embedders.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name,
                 lambda cfg=embedder_config, n=name: self._build_component_coordinated(n, ComponentGroup.EMBEDDERS, cfg))
             build_tasks.append(task)
 
         # Start memory clients
         for name, memory_config in config.memory.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name,
                 lambda cfg=memory_config, n=name: self._build_component_coordinated(n, ComponentGroup.MEMORY, cfg))
             build_tasks.append(task)
 
         # Start retrievers
         for name, retriever_config in config.retrievers.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name, lambda cfg=retriever_config, n=name: self._build_component_coordinated(
                     n, ComponentGroup.RETRIEVERS, cfg))
             build_tasks.append(task)
 
         # Start functions
         for name, function_config in config.functions.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name,
                 lambda cfg=function_config, n=name: self._build_component_coordinated(n, ComponentGroup.FUNCTIONS, cfg))
             build_tasks.append(task)
 
         # Start exporters
         for name, exporter_config in config.general.telemetry.tracing.items():
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 name,
                 lambda cfg=exporter_config, n=name: self._build_component_coordinated(n, ComponentGroup.TRACING, cfg))
             build_tasks.append(task)
 
         # Start workflow if requested
         if not skip_workflow:
-            task = self._dependency_manager.start_component_build(
+            task = self._component_build_manager.start_component_build(
                 "<workflow>",
                 lambda: self._build_component_coordinated("<workflow>", ComponentGroup.FUNCTIONS, config.workflow))
             build_tasks.append(task)
@@ -893,9 +893,9 @@ class WorkflowBuilder(Builder, AbstractAsyncContextManager):
 class AsyncChildBuilder(Builder):
     """
     A fully async child builder that provides dynamic dependency resolution for component build functions.
-    This builder is passed to component build functions and uses await patterns for all dependencies.
 
-    Now uses the parent's DependencyManager for coordination.
+    This builder is passed to component build functions and uses await patterns for all dependencies,
+    coordinating through the parent's ComponentBuildManager.
     """
 
     def __init__(self, parent_builder: WorkflowBuilder, requester_name: str = "unknown"):
@@ -917,8 +917,8 @@ class AsyncChildBuilder(Builder):
         if name in self._parent_builder._functions:
             return self._parent_builder._functions[name].instance
 
-        # Use dependency manager to check if component is defined
-        if self._parent_builder._dependency_manager.is_component_defined(name):
+        # Use component build manager to check if component is defined
+        if self._parent_builder._component_build_manager.is_component_defined(name):
             logger.debug("Component `%s` waiting for function `%s`", self._requester_name, name)
             from aiq.builder.exceptions import DependencyNotReadyError
             raise DependencyNotReadyError(f"Function `{name}` is not ready yet", name)
@@ -927,7 +927,7 @@ class AsyncChildBuilder(Builder):
 
     async def get_function_async(self, name: str) -> Function:
         """Async access - preferred for new code"""
-        function = await self._parent_builder._dependency_manager.wait_for_component(name, self._requester_name)
+        function = await self._parent_builder._component_build_manager.wait_for_component(name, self._requester_name)
         self._dependencies.add_function(name)
         return function.instance
 
@@ -965,7 +965,7 @@ class AsyncChildBuilder(Builder):
                     raise e
 
             # If component is defined in configuration, this is normal building flow
-            if self._parent_builder._dependency_manager.is_component_defined(fn_name):
+            if self._parent_builder._component_build_manager.is_component_defined(fn_name):
                 # This is normal during parallel building - wait briefly and retry
                 logger.debug("Component `%s` waiting for function `%s`", self._requester_name, fn_name)
 
@@ -993,7 +993,7 @@ class AsyncChildBuilder(Builder):
                 raise e
 
         # If component is defined in configuration, this is normal building flow
-        if self._parent_builder._dependency_manager.is_component_defined(fn_name):
+        if self._parent_builder._component_build_manager.is_component_defined(fn_name):
             # This is normal during parallel building - signal dependency waiting
             logger.debug("Component `%s` waiting for function `%s`", self._requester_name, fn_name)
             from aiq.builder.exceptions import DependencyNotReadyError

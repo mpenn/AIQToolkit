@@ -45,7 +45,7 @@ class ComponentInfo:
     waiters: set[str] = dataclasses.field(default_factory=set)
 
 
-class DependencyManager:
+class ComponentBuildManager:
     """
     Manages component dependencies and build coordination for the WorkflowBuilder.
 

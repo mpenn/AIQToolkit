@@ -306,3 +306,12 @@ class BatchingProcessor(CallbackProcessor[T, list[T]], Generic[T]):
             "avg_items_per_batch": self._items_processed / max(1, self._batches_created),
             "drop_rate": self._items_dropped / max(1, self._items_processed) * 100 if self._items_processed > 0 else 0
         }
+
+
+class DictBatchingProcessor(BatchingProcessor[dict]):
+    """Processor that batches dictionary objects for bulk operations.
+
+    Specializes BatchingProcessor with explicit dict typing to support
+    bulk export operations to sinks.
+    """
+    pass

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import logging
+from typing import Literal
 
 from pydantic import Field
 
@@ -22,6 +23,7 @@ from nat.cli.register_workflow import register_logging_method
 from nat.cli.register_workflow import register_telemetry_exporter
 from nat.data_models.logging import LoggingBaseConfig
 from nat.data_models.telemetry_exporter import TelemetryExporterBaseConfig
+from nat.observability.mixin.batch_config_mixin import BatchConfigMixin
 from nat.observability.mixin.file_mode import FileMode
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,58 @@ async def file_telemetry_exporter(config: FileTelemetryExporterConfig, builder: 
                        max_file_size=config.max_file_size,
                        max_files=config.max_files,
                        cleanup_on_init=config.cleanup_on_init)
+
+
+class SimpleHttpSpanTelemetryExporterConfig(TelemetryExporterBaseConfig, BatchConfigMixin, name="simple_http_span"):
+    """A telemetry exporter that writes runtime traces to a HTTP endpoint."""
+
+    endpoint: str = Field(description="The HTTP endpoint URL.")
+    headers: dict[str, str] | None = Field(default=None, description="HTTP headers to include with requests.")
+    timeout: float = Field(default=30.0, description="Request timeout in seconds.")
+    method: Literal["POST"] = Field(default="POST", description="HTTP method to use.")
+
+
+@register_telemetry_exporter(config_type=SimpleHttpSpanTelemetryExporterConfig)
+async def simple_http_telemetry_exporter(config: SimpleHttpSpanTelemetryExporterConfig, _builder: Builder):
+    """
+    Build and return a SimpleHttpSpanExporter for simple span telemetry export to a HTTP endpoint.
+    """
+
+    from nat.observability.exporter.simple_http_span_exporter import SimpleHttpSpanExporter
+
+    yield SimpleHttpSpanExporter(endpoint=config.endpoint,
+                                 headers=config.headers,
+                                 timeout=config.timeout,
+                                 method=config.method,
+                                 batch_size=config.batch_size,
+                                 flush_interval=config.flush_interval,
+                                 max_queue_size=config.max_queue_size,
+                                 drop_on_overflow=config.drop_on_overflow,
+                                 shutdown_timeout=config.shutdown_timeout)
+
+
+class HECSpanTelemetryExporterConfig(SimpleHttpSpanTelemetryExporterConfig, name="hec_span"):
+    """A telemetry exporter that writes runtime traces to a HTTP Event Collector (HEC) endpoint."""
+    pass
+
+
+@register_telemetry_exporter(config_type=HECSpanTelemetryExporterConfig)
+async def hec_span_telemetry_exporter(config: HECSpanTelemetryExporterConfig, _builder: Builder):
+    """
+    Build and return a HECSpanExporter for to an HTTP Event Collector (HEC) endpoint.
+    """
+
+    from nat.observability.exporter.hec_span_exporter import HECSpanExporter
+
+    yield HECSpanExporter(endpoint=config.endpoint,
+                          headers=config.headers,
+                          timeout=config.timeout,
+                          method=config.method,
+                          batch_size=config.batch_size,
+                          flush_interval=config.flush_interval,
+                          max_queue_size=config.max_queue_size,
+                          drop_on_overflow=config.drop_on_overflow,
+                          shutdown_timeout=config.shutdown_timeout)
 
 
 class ConsoleLoggingMethodConfig(LoggingBaseConfig, name="console"):

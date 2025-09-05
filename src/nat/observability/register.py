@@ -70,6 +70,7 @@ class SimpleHttpSpanTelemetryExporterConfig(TelemetryExporterBaseConfig, BatchCo
     headers: dict[str, str] | None = Field(default=None, description="HTTP headers to include with requests.")
     timeout: float = Field(default=30.0, description="Request timeout in seconds.")
     method: Literal["POST"] = Field(default="POST", description="HTTP method to use.")
+    timezone: str = Field(default="Z", description="The timezone of the event.")
 
 
 @register_telemetry_exporter(config_type=SimpleHttpSpanTelemetryExporterConfig)
@@ -84,6 +85,7 @@ async def simple_http_telemetry_exporter(config: SimpleHttpSpanTelemetryExporter
                                  headers=config.headers,
                                  timeout=config.timeout,
                                  method=config.method,
+                                 timezone=config.timezone,
                                  batch_size=config.batch_size,
                                  flush_interval=config.flush_interval,
                                  max_queue_size=config.max_queue_size,

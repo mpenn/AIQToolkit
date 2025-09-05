@@ -25,11 +25,15 @@ class HECSpan(BaseModel):
     """A HECSpan object for use in HTTP Event Collector (HEC) exports."""
 
     event: Span = Field(..., description="The Span event to convert to a HECSpan.")
+    timezone: str = Field(default="Z", description="The timezone of the event.")
 
 
 class SpanToHECProcessor(Processor[Span, HECSpan]):
     """Processor that converts a Span to a HECSpan for use in HTTP Event Collector (HEC) exports."""
 
+    def __init__(self, timezone: str = "Z"):
+        self._timezone = timezone
+
     @override
     async def process(self, item: Span) -> HECSpan:
-        return HECSpan(event=item)
+        return HECSpan(event=item, timezone=self._timezone)

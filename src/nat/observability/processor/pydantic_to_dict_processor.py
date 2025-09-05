@@ -20,8 +20,8 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from nat.data_models.span import Span
-from nat.observability.processor.hec_processor import HECSpan
 from nat.observability.processor.processor import Processor
+from nat.observability.processor.span_to_hec_processor import HECSpan
 
 logger = logging.getLogger(__name__)
 

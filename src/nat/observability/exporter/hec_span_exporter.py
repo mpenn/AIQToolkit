@@ -15,8 +15,8 @@
 
 from nat.builder.context import ContextState
 from nat.observability.exporter.simple_http_span_exporter import SimpleHttpSpanExporter
-from nat.observability.processor.hec_processor import SpanToHECProcessor
 from nat.observability.processor.pydantic_to_dict_processor import HECToDictProcessor
+from nat.observability.processor.span_to_hec_processor import SpanToHECProcessor
 
 
 class HECSpanExporter(SimpleHttpSpanExporter):
@@ -39,6 +39,7 @@ class HECSpanExporter(SimpleHttpSpanExporter):
                  max_queue_size: int = 1000,
                  drop_on_overflow: bool = False,
                  shutdown_timeout: float = 10.0,
+                 timezone: str = "Z",
                  **simple_http_kwargs):
         jsonlines_setting = simple_http_kwargs.pop('jsonlines', True)
         super().__init__(context_state=context_state,
@@ -51,4 +52,4 @@ class HECSpanExporter(SimpleHttpSpanExporter):
                          **simple_http_kwargs)
         self.remove_processor("span_to_dict")
         self.add_processor(HECToDictProcessor(), name="hec_to_dict", before="dict_batching")
-        self.add_processor(SpanToHECProcessor(), name="span_to_hec", before="hec_to_dict")
+        self.add_processor(SpanToHECProcessor(timezone=timezone), name="span_to_hec", before="hec_to_dict")

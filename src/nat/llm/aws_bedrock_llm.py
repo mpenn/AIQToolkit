@@ -30,7 +30,7 @@ from nat.data_models.top_p_mixin import TopPMixin
 class AWSBedrockModelConfig(LLMBaseConfig, RetryMixin, TemperatureMixin, TopPMixin, ThinkingMixin, name="aws_bedrock"):
     """An AWS Bedrock llm provider to be used with an LLM client."""
 
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), extra="allow")
 
     # Completion parameters
     model_name: str = Field(validation_alias=AliasChoices("model_name", "model"),
@@ -41,7 +41,7 @@ class AWSBedrockModelConfig(LLMBaseConfig, RetryMixin, TemperatureMixin, TopPMix
         default=1024,
         gt=0,
         description="The maximum number of tokens available for input. This is only required for LlamaIndex. "
-        "This field is ignored for Langchain.",
+        "This field is ignored for LangChain/LangGraph.",
     )
 
     # Client parameters

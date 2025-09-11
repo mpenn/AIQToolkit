@@ -125,7 +125,7 @@ The `text_file_ingest_tool` function created is already correctly associated wit
 async def text_file_ingest_function(config: TextFileIngestFunctionConfig, builder: Builder):
 ```
 
-However since we are going to make use of LangChain, we need to add the `framework_wrappers` parameter to the `register_function` decorator:
+However since we are going to make use of LangChain/LangGraph, we need to add the `framework_wrappers` parameter to the `register_function` decorator:
 ```python
 @register_function(config_type=TextFileIngestFunctionConfig, framework_wrappers=[LLMFrameworkEnum.LANGCHAIN])
 async def text_file_ingest_function(config: TextFileIngestFunctionConfig, builder: Builder):
@@ -198,7 +198,7 @@ async def text_file_ingest_function(config: TextFileIngestFunctionConfig, builde
 
 ## Creating the Workflow Configuration
 
-Starting from the `custom_config.yml` file you created in the previous section, replace the two `webpage_query` tools with the new `text_file_ingest` tool. For the data source, you can use a collection of text files located in the `examples/documentation_guides/workflows/text_file_ingest/data` directory that describes [DOCA GPUNetIO](https://docs.nvidia.com/doca/sdk/doca-gpunetio/index.html).
+Starting from the `custom_config.yml` file you created in the previous section, replace the two `webpage_query` tools with the new `text_file_ingest` tool. For the data source, you can use a collection of text files located in the `examples/documentation_guides/workflows/text_file_ingest/data` directory that describes [DOCA GPUNetIO](https://docs.nvidia.com/doca/sdk/doca+gpunetio/index.html).
 
 :::{note}
 <!-- path-check-skip-next-line -->
@@ -246,7 +246,7 @@ The `pyproject.toml` file defines your package metadata and dependencies. In thi
   ]
   ```
 
-  In this example, you have been using NeMo Agent toolkit with LangChain. This is why the dependency is declared on `nvidia-nat[langchain]`, that is to say NeMo Agent toolkit with the LangChain integration plugin. If you want to use LlamaIndex, declare the dependency on `nvidia-nat[llama-index]`. This is described in more detail in [Framework Integrations](../quick-start/installing.md#framework-integrations).
+  In this example, you have been using NeMo Agent toolkit with LangChain/LangGraph. This is why the dependency is declared on `nvidia-nat[langchain]`, that is to say NeMo Agent toolkit with the LangChain/LangGraph integration plugin. If you want to use LlamaIndex, declare the dependency on `nvidia-nat[llama-index]`. This is described in more detail in [Framework Integrations](../quick-start/installing.md#framework-integrations).
 
 - **Version**: In this example, and in NeMo Agent toolkit in general, we use [setuptools-scm](https://setuptools-scm.readthedocs.io/en/latest/) to automatically determine the version of the package based on the Git tags. We did this by setting `dynamic = ["version"]` and declaring a build dependency on both `setuptools` and `setuptools_scm` in the `build-system` section of `pyproject.toml`:
   ```toml
